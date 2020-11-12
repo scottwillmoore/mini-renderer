@@ -1,14 +1,20 @@
 cmake_minimum_required(VERSION 3.18)
 
-project(vulkan-experiments)
+set(EXECUTABLE_NAME VulkanExperiments)
+
+project(${EXECUTABLE_NAME})
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_executable(vulkan-experiments src/main.cpp)
+find_package(Vulkan REQUIRED)
+find_package(glm CONFIG REQUIRED)
+find_package(glfw3 CONFIG REQUIRED)
 
-add_subdirectory(lib/glfw EXCLUDE_FROM_ALL)
-target_link_libraries(vulkan-experiments PRIVATE glfw)
+add_executable(${EXECUTABLE_NAME} src/main.cpp)
 
-add_subdirectory(lib/glm EXCLUDE_FROM_ALL)
-target_link_libraries(vulkan-experiments PRIVATE glm)
+target_include_directories(${EXECUTABLE_NAME} PRIVATE ${Vulkan_INCLUDE_DIRS})
+
+target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${Vulkan_LIBRARIES})
+target_link_libraries(${EXECUTABLE_NAME} PRIVATE glfw)
+target_link_libraries(${EXECUTABLE_NAME} PRIVATE glm)
