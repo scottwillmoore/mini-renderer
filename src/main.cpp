@@ -79,7 +79,7 @@ void run() {
 			}) != layerProperties.end();
 		});
 	if (!hasLayers) {
-		throw std::runtime_error("validation layers are not available");
+		throw std::runtime_error("not all layers found");
 	}
 
 
@@ -114,6 +114,31 @@ void run() {
 #ifdef USE_VALIDATION
 	vk::UniqueDebugUtilsMessengerEXT debugUtilsMessenger = instance->createDebugUtilsMessengerEXTUnique(debugUtilsMessengerCreateInfo);
 #endif
+
+	// TODO: Find device that is suitable and most appropriate.
+	// std::vector<vk::PhysicalDevice> physicalDevices = instance->enumeratePhysicalDevices();
+	vk::PhysicalDevice physicalDevice = instance->enumeratePhysicalDevices().front();
+
+	std::vector<vk::QueueFamilyProperties> queueFamilies = physicalDevice.getQueueFamilyProperties();
+	auto queueFamiliesIterator = std::find_if(queueFamilies.begin(), queueFamilies.end(), [](vk::QueueFamilyProperties const& queueFamily) {
+		return queueFamily.queueFlags & vk::QueueFlagBits::eGraphics;
+		});
+	auto hasQueueFamily = queueFamiliesIterator != queueFamilies.end();
+	if (!hasQueueFamily) {
+		throw std::runtime_error("no suitable queue family found");
+	}
+	uint32_t queueFamilyIndex = static_cast<uint32_t>(std::distance(queueFamilies.begin(), queueFamiliesIterator));
+	float queuePriority = 1.0f;
+
+	vk::DeviceQueueCreateInfo deviceQueueCreateInfo(vk::DeviceQueueCreateFlags(), queueFamilyIndex, 1, &queuePriority);
+	vk::DeviceCreateInfo deviceCreateInfo(vk::DeviceCreateFlags(), deviceQueueCreateInfo);
+	vk::UniqueDevice device = physicalDevice.createDeviceUnique(deviceCreateInfo);
+
+#if (VULKAN_HPP_DISPATCH_LOADER_DYNAMIC == 1)
+	VULKAN_HPP_DEFAULT_DISPATCHER.init(*device);
+#endif
+
+	vk::Queue queue = device->getQueue(queueFamilyIndex, 0);
 
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
