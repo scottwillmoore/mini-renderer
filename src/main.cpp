@@ -84,7 +84,6 @@ void run() {
 		throw std::runtime_error("could not find all required layers");
 	}
 
-
 	uint32_t glfwRequiredExtensionsCount = 0;
 	const char** glfwRequiredExtensions = glfwGetRequiredInstanceExtensions(&glfwRequiredExtensionsCount);
 	std::vector<char const*> extensionNames(glfwRequiredExtensions, glfwRequiredExtensions + glfwRequiredExtensionsCount);
@@ -126,7 +125,6 @@ void run() {
 	vk::UniqueDebugUtilsMessengerEXT debugUtilsMessenger = instance->createDebugUtilsMessengerEXTUnique(debugUtilsMessengerCreateInfo);
 #endif
 
-	// TODO: Find device that is suitable and most appropriate.
 	vk::PhysicalDevice physicalDevice = instance->enumeratePhysicalDevices().front();
 
 	std::vector<vk::QueueFamilyProperties> queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
@@ -161,7 +159,20 @@ void run() {
 		queueCreateInfos.push_back({ vk::DeviceQueueCreateFlags(), queueFamily, 1, &queuePriority });
 	}
 
-	vk::DeviceCreateInfo deviceCreateInfo(vk::DeviceCreateFlags(), queueCreateInfos);
+	std::vector<char const*> deviceExtensionNames;
+	deviceExtensionNames.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+
+	std::vector<vk::ExtensionProperties> extensionProperties = physicalDevice.enumerateDeviceExtensionProperties();
+	auto hasDeviceExtensions = std::all_of(deviceExtensionNames.begin(), deviceExtensionNames.end(), [&extensionProperties](char const* extensionName) {
+		return std::find_if(extensionProperties.begin(), extensionProperties.end(), [&extensionName](vk::ExtensionProperties const& extensionProperty) {
+			return strcmp(extensionProperty.extensionName, extensionName) == 0;
+			}) != extensionProperties.end();
+		});
+	if (!hasDeviceExtensions) {
+		throw std::runtime_error("could not find all required device extensions");
+	}
+
+	vk::DeviceCreateInfo deviceCreateInfo(vk::DeviceCreateFlags(), queueCreateInfos, {}, deviceExtensionNames);
 	vk::UniqueDevice device = physicalDevice.createDeviceUnique(deviceCreateInfo);
 
 #if (VULKAN_HPP_DISPATCH_LOADER_DYNAMIC == 1)
@@ -170,6 +181,87 @@ void run() {
 
 	vk::Queue graphicsQueue = device->getQueue(graphicsQueueFamily.value(), 0);
 	vk::Queue presentQueue = device->getQueue(presentQueueFamily.value(), 0);
+
+	std::vector<vk::SurfaceFormatKHR> surfaceFormats = physicalDevice.getSurfaceFormatsKHR(*surface);
+	if (surfaceFormats.empty()) {
+		throw std::runtime_error("could not find any surface formats");
+	}
+	vk::SurfaceFormatKHR chosenFormat = surfaceFormats[0];
+	for (auto& surfaceFormat : surfaceFormats) {
+		if (surfaceFormat.format == vk::Format::eB8G8R8A8Srgb && surfaceFormat.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
+			chosenFormat = surfaceFormat;
+		}
+	}
+
+	std::vector<vk::PresentModeKHR> surfacePresentModes = physicalDevice.getSurfacePresentModesKHR(*surface);
+	if (surfacePresentModes.empty()) {
+		throw std::runtime_error("could not find any surface present modes");
+	}
+	vk::PresentModeKHR chosenPresentMode = vk::PresentModeKHR::eFifo;
+	for (auto& surfacePresentMode : surfacePresentModes) {
+		if (surfacePresentMode == vk::PresentModeKHR::eMailbox) {
+			chosenPresentMode = surfacePresentMode;
+		}
+	}
+
+	vk::SurfaceCapabilitiesKHR surfaceCapabilities = physicalDevice.getSurfaceCapabilitiesKHR(*surface);
+	vk::Extent2D chosenExtent = surfaceCapabilities.currentExtent;
+	if (surfaceCapabilities.currentExtent.width == UINT32_MAX) {
+		int width, height;
+		glfwGetFramebufferSize(window, &width, &height);
+
+		vk::Extent2D actualExtent(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+		actualExtent.width = std::clamp(actualExtent.width, surfaceCapabilities.minImageExtent.width, surfaceCapabilities.maxImageExtent.width);
+		actualExtent.height = std::clamp(actualExtent.height, surfaceCapabilities.minImageExtent.height, surfaceCapabilities.maxImageExtent.height);
+
+		chosenExtent = actualExtent;
+	}
+
+	uint32_t imageCount = surfaceCapabilities.minImageCount + 1;
+	if (surfaceCapabilities.maxImageCount > 0 && imageCount > surfaceCapabilities.maxImageCount) {
+		imageCount = surfaceCapabilities.maxImageCount;
+	}
+
+	vk::SwapchainCreateInfoKHR swapchainCreateInfo(
+		vk::SwapchainCreateFlagsKHR(),
+		*surface,
+		imageCount,
+		chosenFormat.format,
+		chosenFormat.colorSpace,
+		chosenExtent,
+		1,
+		vk::ImageUsageFlagBits::eColorAttachment,
+		vk::SharingMode::eExclusive,
+		{},
+		surfaceCapabilities.currentTransform,
+		vk::CompositeAlphaFlagBitsKHR::eOpaque,
+		chosenPresentMode,
+		VK_TRUE
+	);
+
+	if (graphicsQueueFamily.value() != presentQueueFamily.value()) {
+		std::vector<uint32_t> queueFamilies(uniqueQueueFamilies.begin(), uniqueQueueFamilies.end());
+		swapchainCreateInfo
+			.setImageSharingMode(vk::SharingMode::eConcurrent)
+			.setQueueFamilyIndices(queueFamilies);
+	}
+
+	vk::UniqueSwapchainKHR swapchain = device->createSwapchainKHRUnique(swapchainCreateInfo);
+
+	std::vector<vk::Image> swapchainImages = device->getSwapchainImagesKHR(*swapchain);
+
+	std::vector<vk::UniqueImageView> swapchainImageViews(swapchainImages.size());
+	for (size_t i = 0; i < swapchainImages.size(); i++) {
+		vk::ImageViewCreateInfo imageViewCreateInfo(
+			vk::ImageViewCreateFlags(),
+			swapchainImages[i],
+			vk::ImageViewType::e2D,
+			chosenFormat.format,
+			{},
+			{ vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }
+		);
+		swapchainImageViews[i] = device->createImageViewUnique(imageViewCreateInfo);
+	}
 
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
