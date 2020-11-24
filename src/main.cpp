@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <iostream>
+#include <optional>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -79,7 +81,7 @@ void run() {
 			}) != layerProperties.end();
 		});
 	if (!hasLayers) {
-		throw std::runtime_error("not all layers found");
+		throw std::runtime_error("could not find all required layers");
 	}
 
 
@@ -110,35 +112,64 @@ void run() {
 #if (VULKAN_HPP_DISPATCH_LOADER_DYNAMIC == 1)
 	VULKAN_HPP_DEFAULT_DISPATCHER.init(*instance);
 #endif
+	vk::UniqueSurfaceKHR surface;
+	{
+		VkSurfaceKHR _surface;
+		if (glfwCreateWindowSurface(*instance, window, nullptr, &_surface) != VK_SUCCESS) {
+			throw std::runtime_error("could not create window surface");
+		}
+		vk::ObjectDestroy<vk::Instance, VULKAN_HPP_DEFAULT_DISPATCHER_TYPE> _deleter(*instance);
+		surface = vk::UniqueSurfaceKHR(vk::SurfaceKHR(_surface), _deleter);
+	}
 
 #ifdef USE_VALIDATION
 	vk::UniqueDebugUtilsMessengerEXT debugUtilsMessenger = instance->createDebugUtilsMessengerEXTUnique(debugUtilsMessengerCreateInfo);
 #endif
 
 	// TODO: Find device that is suitable and most appropriate.
-	// std::vector<vk::PhysicalDevice> physicalDevices = instance->enumeratePhysicalDevices();
 	vk::PhysicalDevice physicalDevice = instance->enumeratePhysicalDevices().front();
 
-	std::vector<vk::QueueFamilyProperties> queueFamilies = physicalDevice.getQueueFamilyProperties();
-	auto queueFamiliesIterator = std::find_if(queueFamilies.begin(), queueFamilies.end(), [](vk::QueueFamilyProperties const& queueFamily) {
-		return queueFamily.queueFlags & vk::QueueFlagBits::eGraphics;
-		});
-	auto hasQueueFamily = queueFamiliesIterator != queueFamilies.end();
-	if (!hasQueueFamily) {
-		throw std::runtime_error("no suitable queue family found");
-	}
-	uint32_t queueFamilyIndex = static_cast<uint32_t>(std::distance(queueFamilies.begin(), queueFamiliesIterator));
-	float queuePriority = 1.0f;
+	std::vector<vk::QueueFamilyProperties> queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
 
-	vk::DeviceQueueCreateInfo deviceQueueCreateInfo(vk::DeviceQueueCreateFlags(), queueFamilyIndex, 1, &queuePriority);
-	vk::DeviceCreateInfo deviceCreateInfo(vk::DeviceCreateFlags(), deviceQueueCreateInfo);
+	std::optional<uint32_t> graphicsQueueFamily;
+	for (size_t i = 0; i < queueFamilyProperties.size(); i++) {
+		if (queueFamilyProperties[i].queueFlags & vk::QueueFlagBits::eGraphics) {
+			graphicsQueueFamily = i;
+			break;
+		}
+	}
+	if (!graphicsQueueFamily.has_value()) {
+		throw std::runtime_error("could not find suitable graphics queue family");
+	}
+
+	std::optional<uint32_t> presentQueueFamily;
+	for (size_t i = 0; i < queueFamilyProperties.size(); i++) {
+		if (physicalDevice.getSurfaceSupportKHR(i, *surface)) {
+			presentQueueFamily = i;
+			break;
+		}
+	}
+	if (!presentQueueFamily.has_value()) {
+		throw std::runtime_error("could not find suitable present queue family");
+	}
+
+	std::set<uint32_t> uniqueQueueFamilies = { graphicsQueueFamily.value(), presentQueueFamily.value() };
+
+	std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
+	float queuePriority = 1.0f;
+	for (auto& queueFamily : uniqueQueueFamilies) {
+		queueCreateInfos.push_back({ vk::DeviceQueueCreateFlags(), queueFamily, 1, &queuePriority });
+	}
+
+	vk::DeviceCreateInfo deviceCreateInfo(vk::DeviceCreateFlags(), queueCreateInfos);
 	vk::UniqueDevice device = physicalDevice.createDeviceUnique(deviceCreateInfo);
 
 #if (VULKAN_HPP_DISPATCH_LOADER_DYNAMIC == 1)
 	VULKAN_HPP_DEFAULT_DISPATCHER.init(*device);
 #endif
 
-	vk::Queue queue = device->getQueue(queueFamilyIndex, 0);
+	vk::Queue graphicsQueue = device->getQueue(graphicsQueueFamily.value(), 0);
+	vk::Queue presentQueue = device->getQueue(presentQueueFamily.value(), 0);
 
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
