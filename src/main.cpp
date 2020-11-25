@@ -3,6 +3,8 @@
 #include <cstring>
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <set>
@@ -54,6 +56,23 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
 	std::cout << message.str() << std::endl;
 
 	return VK_FALSE;
+}
+
+std::vector<char> readBinaryFile(const std::string& name) {
+	std::ifstream file(name, std::ios::ate | std::ios::binary);
+
+	if (!file.is_open()) {
+		throw std::runtime_error("could not open file");
+	}
+
+	size_t fileSize = static_cast<size_t>(file.tellg());
+	std::vector<char> buffer(fileSize);
+
+	file.seekg(0);
+	file.read(buffer.data(), fileSize);
+	file.close();
+
+	return buffer;
 }
 
 void run() {
@@ -262,6 +281,37 @@ void run() {
 		);
 		swapchainImageViews[i] = device->createImageViewUnique(imageViewCreateInfo);
 	}
+
+	auto vertexShaderBuffer = readBinaryFile("../resources/shader.vert.spv");
+	vk::ShaderModuleCreateInfo vertexShaderCreateInfo(
+		vk::ShaderModuleCreateFlags(),
+		vertexShaderBuffer.size(),
+		reinterpret_cast<uint32_t*>(vertexShaderBuffer.data())
+	);
+	vk::UniqueShaderModule vertexShader = device->createShaderModuleUnique(vertexShaderCreateInfo);
+
+	auto fragmentShaderBuffer = readBinaryFile("../resources/shader.frag.spv");
+	vk::ShaderModuleCreateInfo fragmentShaderCreateInfo(
+		vk::ShaderModuleCreateFlags(),
+		fragmentShaderBuffer.size(),
+		reinterpret_cast<uint32_t*>(fragmentShaderBuffer.data())
+	);
+	vk::UniqueShaderModule fragmentShader = device->createShaderModuleUnique(fragmentShaderCreateInfo);
+
+	std::vector<vk::PipelineShaderStageCreateInfo> shaderStages;
+	shaderStages.push_back(vk::PipelineShaderStageCreateInfo(
+		vk::PipelineShaderStageCreateFlags(),
+		vk::ShaderStageFlagBits::eVertex,
+		*vertexShader,
+		"main"
+	));
+	shaderStages.push_back(vk::PipelineShaderStageCreateInfo(
+		vk::PipelineShaderStageCreateFlags(),
+		vk::ShaderStageFlagBits::eFragment,
+		*fragmentShader,
+		"main"
+	));
+
 
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
