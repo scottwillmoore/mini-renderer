@@ -27,6 +27,7 @@
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 #endif
 
+// TODO: Use to runtime validation instead.
 #define USE_VALIDATION
 
 const uint32_t WIDTH = 800;
@@ -38,6 +39,7 @@ const uint32_t APP_VERSION = 1;
 const char* ENGINE_NAME = "Mini Renderer";
 const uint32_t ENGINE_VERSION = 1;
 
+// TODO: Write better debug callback and display more of the callback data.
 VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
 	VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
 	VkDebugUtilsMessageTypeFlagsEXT messageTypes,
@@ -74,6 +76,46 @@ std::vector<char> readBinaryFile(const std::string& name) {
 
 	return buffer;
 }
+
+// The process!
+// The logic is currently in one single enormous function.
+// It will be easier to abstract into functions later in development.
+//
+// createInstance
+// - chooseInstanceLayers (check is supported)
+// - chooseInstanceExtensions (check is supported)
+// - createApplicationInfo
+// - createDebugMessengerCreateInfo
+// - createInstanceInfo
+//
+// createDebugMessenger
+// - createDebugMessengerCreateInfo (re-use from createInstance)
+//
+// createSurface
+//
+// createDevice
+// - choosePhysicalDevice
+// - chooseQueueFamilies (graphics and present families usually chosen together)
+// - createQueueCreateInfo
+// - chooseDeviceExtensions (check is supported)
+//
+// createQueues
+//
+// createSwapchain
+// - chooseFormat (choose most appropriate)
+// - choosePresentMode (choose most appropriate)
+// - getSurfaceCapabilities
+// - chooseExtent (choose from surface capabilities)
+// - createSwapchainCreateInfo
+//
+// createSwapchainImages
+// createSwapchainImageViews
+//
+// createPipeline
+// - readShaderFiles
+// - createShaderModules
+// - createShaderStages
+// ...
 
 void run() {
 	glfwInit();
@@ -130,6 +172,11 @@ void run() {
 #if (VULKAN_HPP_DISPATCH_LOADER_DYNAMIC == 1)
 	VULKAN_HPP_DEFAULT_DISPATCHER.init(*instance);
 #endif
+
+#ifdef USE_VALIDATION
+	vk::UniqueDebugUtilsMessengerEXT debugUtilsMessenger = instance->createDebugUtilsMessengerEXTUnique(debugUtilsMessengerCreateInfo);
+#endif
+
 	vk::UniqueSurfaceKHR surface;
 	{
 		VkSurfaceKHR _surface;
@@ -139,10 +186,6 @@ void run() {
 		vk::ObjectDestroy<vk::Instance, VULKAN_HPP_DEFAULT_DISPATCHER_TYPE> _deleter(*instance);
 		surface = vk::UniqueSurfaceKHR(vk::SurfaceKHR(_surface), _deleter);
 	}
-
-#ifdef USE_VALIDATION
-	vk::UniqueDebugUtilsMessengerEXT debugUtilsMessenger = instance->createDebugUtilsMessengerEXTUnique(debugUtilsMessengerCreateInfo);
-#endif
 
 	vk::PhysicalDevice physicalDevice = instance->enumeratePhysicalDevices().front();
 
@@ -311,7 +354,6 @@ void run() {
 		*fragmentShader,
 		"main"
 	));
-
 
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
