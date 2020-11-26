@@ -355,6 +355,66 @@ void run() {
 		"main"
 	));
 
+	// NOTE: Decided to use the setter functions to see if it improves readability.
+
+	auto vertexInputCreateInfo = vk::PipelineVertexInputStateCreateInfo();
+
+	auto inputAssemblyCreateInfo = vk::PipelineInputAssemblyStateCreateInfo()
+		.setTopology(vk::PrimitiveTopology::eTriangleList)
+		.setPrimitiveRestartEnable(false);
+
+	auto viewport = vk::Viewport()
+		.setX(0.0)
+		.setY(0.0)
+		.setWidth(chosenExtent.width)
+		.setHeight(chosenExtent.height)
+		.setMinDepth(0.0)
+		.setMaxDepth(1.0);
+
+	auto scissor = vk::Rect2D()
+		.setOffset({ 0, 0 })
+		.setExtent(chosenExtent);
+
+	auto viewportStageCreateInfo = vk::PipelineViewportStateCreateInfo()
+		.setViewports(viewport)
+		.setScissors(scissor);
+
+	auto rasterizerCreateInfo = vk::PipelineRasterizationStateCreateInfo()
+		.setDepthClampEnable(false)
+		.setPolygonMode(vk::PolygonMode::eFill)
+		.setLineWidth(1.0)
+		.setCullMode(vk::CullModeFlagBits::eBack)
+		.setFrontFace(vk::FrontFace::eClockwise)
+		.setDepthBiasClamp(false);
+
+	auto multisampleCreateInfo = vk::PipelineMultisampleStateCreateInfo()
+		.setSampleShadingEnable(false)
+		.setRasterizationSamples(vk::SampleCountFlagBits::e1)
+		.setMinSampleShading(1.0);
+
+	auto colorBlendAttachment = vk::PipelineColorBlendAttachmentState()
+		.setColorWriteMask(vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA)
+		.setBlendEnable(false)
+		.setSrcColorBlendFactor(vk::BlendFactor::eOne)
+		.setDstColorBlendFactor(vk::BlendFactor::eZero)
+		.setColorBlendOp(vk::BlendOp::eAdd)
+		.setSrcAlphaBlendFactor(vk::BlendFactor::eOne)
+		.setDstAlphaBlendFactor(vk::BlendFactor::eZero)
+		.setAlphaBlendOp(vk::BlendOp::eAdd);
+
+	auto colorBlendCreateInfo = vk::PipelineColorBlendStateCreateInfo()
+		.setLogicOpEnable(false)
+		.setLogicOp(vk::LogicOp::eCopy)
+		.setAttachments(colorBlendAttachment)
+		.setBlendConstants({ 0.0, 0.0, 0.0, 0.0 });
+
+	std::array<vk::DynamicState, 2> dynamicStates = { vk::DynamicState::eViewport, vk::DynamicState::eLineWidth };
+	auto dynamicStateCreateInfo = vk::PipelineDynamicStateCreateInfo()
+		.setDynamicStates(dynamicStates);
+
+	auto pipelineLayoutCreateInfo = vk::PipelineLayoutCreateInfo();
+	auto pipelinelayout = device->createPipelineLayoutUnique(pipelineLayoutCreateInfo);
+
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
 	}
