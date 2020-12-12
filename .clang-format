@@ -1,0 +1,16 @@
+AlignAfterOpenBracket: AlwaysBreak
+AlignOperands: false
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+AlwaysBreakAfterReturnType: All
+BinPackArguments: false
+BinPackParameters: false
+BreakBeforeBinaryOperators: NonAssignment
+BreakBeforeBraces: WebKit
+BreakStringLiterals: false
+ColumnLimit: 100
+ContinuationIndentWidth: 4
+IndentWidth: 4
+KeepEmptyLinesAtTheStartOfBlocks: false
+Language: Cpp
+TabWidth: 4

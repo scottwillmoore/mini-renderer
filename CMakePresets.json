@@ -1,0 +1,31 @@
+{
+    "version": 1,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 19,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "x64-windows",
+            "hidden": true,
+            "architecture": "x64",
+            "cacheVariables": {
+                "VCPKG_TARGET_TRIPLET": "x64-windows-static",
+                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/lib/scripts/buildsystems/vcpkg.cmake"
+            }
+        },
+        {
+            "name": "x64-windows-vs2019",
+            "inherits": "x64-windows",
+            "generator": "Visual Studio 16 2019",
+            "binaryDir": "${sourceDir}/build"
+        },
+        {
+            "name": "x64-windows-nmake",
+            "inherits": "x64-windows",
+            "generator": "NMake Makefiles",
+            "binaryDir": "${sourceDir}/build"
+        }
+    ]
+}
