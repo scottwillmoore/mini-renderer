@@ -1,8 +1,8 @@
+AccessModifierOffset: -4
 AlignAfterOpenBracket: AlwaysBreak
 AlignOperands: false
 AllowAllArgumentsOnNextLine: false
 AllowAllParametersOfDeclarationOnNextLine: false
-AlwaysBreakAfterReturnType: All
 BinPackArguments: false
 BinPackParameters: false
 BreakBeforeBinaryOperators: NonAssignment
