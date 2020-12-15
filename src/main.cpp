@@ -1,13 +1,9 @@
-﻿#include <algorithm>
-#include <cstdint>
+﻿#include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <optional>
-#include <set>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -28,6 +24,7 @@ uint32_t const REQUIRED_VULKAN_VERSION = VK_API_VERSION_1_2;
 // for safe destruction of resources. I beleive in a single compilation unit this order is
 // well-defined, however it will always be better to wrap these variables in a struct or class or
 // excplicitly invoke the destructors.
+
 vk::DynamicLoader dynamicLoader;
 GLFWwindow *window;
 vk::UniqueInstance instance;
@@ -45,6 +42,11 @@ std::vector<vk::UniqueImageView> swapchainImageViews;
 vk::UniqueRenderPass renderPass;
 vk::UniquePipelineLayout pipelineLayout;
 vk::UniquePipeline pipeline;
+std::vector<vk::UniqueFramebuffer> swapchainFramebuffers;
+vk::UniqueCommandPool commandPool;
+std::vector<vk::UniqueCommandBuffer> commandBuffers;
+vk::UniqueSemaphore imageAvailable;
+vk::UniqueSemaphore renderFinished;
 
 std::vector<char> readBytes(std::string const &filePath)
 {
@@ -237,8 +239,9 @@ void createDevice(std::vector<char const *> requiredExtensions)
         .pQueuePriorities = &queuePriority,
     };
 
-    std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
-    queueCreateInfos.push_back(queueCreateInfo);
+    std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos{
+        queueCreateInfo,
+    };
 
     vk::DeviceCreateInfo deviceCreateInfo{
         .queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size()),
@@ -252,6 +255,8 @@ void createDevice(std::vector<char const *> requiredExtensions)
 #if (VULKAN_HPP_DISPATCH_LOADER_DYNAMIC == 1)
     VULKAN_HPP_DEFAULT_DISPATCHER.init(*device);
 #endif
+
+    queue = device->getQueue(queueFamilyIndex, 0);
 }
 
 void createSwapchain()
@@ -326,7 +331,10 @@ void createSwapchain()
     };
 
     swapchain = device->createSwapchainKHRUnique(swapchainCreateInfo);
+}
 
+void createImageViews()
+{
     auto swapchainImages = device->getSwapchainImagesKHR(*swapchain);
 
     swapchainImageViews = std::vector<vk::UniqueImageView>(swapchainImages.size());
@@ -373,11 +381,22 @@ void createRenderPass()
         .pColorAttachments = &colorAttachmentReference,
     };
 
+    vk::SubpassDependency subpassDependency{
+        .srcSubpass = VK_SUBPASS_EXTERNAL,
+        .dstSubpass = 0,
+        .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput,
+        .dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput,
+        //.srcAccessMask = {},
+        .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
+    };
+
     vk::RenderPassCreateInfo renderPassCreateInfo{
         .attachmentCount = 1,
         .pAttachments = &colorAttachment,
         .subpassCount = 1,
         .pSubpasses = &subpass,
+        .dependencyCount = 1,
+        .pDependencies = &subpassDependency,
     };
 
     renderPass = device->createRenderPassUnique(renderPassCreateInfo);
@@ -521,6 +540,112 @@ void createGraphicsPipeline()
     pipeline = device->createGraphicsPipelineUnique(nullptr, graphicsPipelineCreateInfo);
 }
 
+void createFramebuffers()
+{
+    swapchainFramebuffers.resize(swapchainImageViews.size());
+    for (size_t i = 0; i < swapchainFramebuffers.size(); i++) {
+        vk::FramebufferCreateInfo frameBufferCreateInfo{
+            .renderPass = *renderPass,
+            .attachmentCount = 1,
+            .pAttachments = &*swapchainImageViews[i],
+            .width = swapchainExtent.width,
+            .height = swapchainExtent.height,
+            .layers = 1,
+        };
+
+        swapchainFramebuffers[i] = device->createFramebufferUnique(frameBufferCreateInfo);
+    }
+}
+
+void createCommandPool()
+{
+    vk::CommandPoolCreateInfo commandPoolCreateInfo{
+        .queueFamilyIndex = queueFamilyIndex,
+    };
+
+    commandPool = device->createCommandPoolUnique(commandPoolCreateInfo);
+}
+
+void createCommandBuffers()
+{
+    commandBuffers.resize(swapchainFramebuffers.size());
+
+    vk::CommandBufferAllocateInfo commandBufferAllocateInfo{
+        .commandPool = *commandPool,
+        .level = vk::CommandBufferLevel::ePrimary,
+        .commandBufferCount = static_cast<uint32_t>(commandBuffers.size()),
+    };
+
+    commandBuffers = device->allocateCommandBuffersUnique(commandBufferAllocateInfo);
+
+    for (size_t i = 0; i < commandBuffers.size(); i++) {
+        vk::CommandBufferBeginInfo commandBufferBeginInfo{
+            //.pInheritanceInfo = nullptr,
+        };
+
+        commandBuffers[i]->begin(commandBufferBeginInfo);
+
+        vk::ClearValue clearColor = vk::ClearValue{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
+
+        vk::RenderPassBeginInfo renderPassBeginInfo{
+            .renderPass = *renderPass,
+            .framebuffer = *swapchainFramebuffers[i],
+            .renderArea =
+                vk::Rect2D{
+                    .offset = {0, 0},
+                    .extent = swapchainExtent,
+                },
+            .clearValueCount = 1,
+            .pClearValues = &clearColor,
+        };
+
+        commandBuffers[i]->beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
+        commandBuffers[i]->bindPipeline(vk::PipelineBindPoint::eGraphics, *pipeline);
+        commandBuffers[i]->draw(3, 1, 0, 0);
+        commandBuffers[i]->endRenderPass();
+        commandBuffers[i]->end();
+    }
+}
+
+void createSemaphores()
+{
+    vk::SemaphoreCreateInfo semaphoreCreateInfo;
+    imageAvailable = device->createSemaphoreUnique(semaphoreCreateInfo);
+    renderFinished = device->createSemaphoreUnique(semaphoreCreateInfo);
+}
+
+void drawFrame()
+{
+    uint32_t imageIndex;
+    imageIndex = device->acquireNextImageKHR(*swapchain, UINT64_MAX, *imageAvailable, nullptr);
+
+    vk::PipelineStageFlags pipelineStateFlags{vk::PipelineStageFlagBits::eColorAttachmentOutput};
+    vk::SubmitInfo submitInfo{
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &*imageAvailable,
+        .pWaitDstStageMask = &pipelineStateFlags,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &*commandBuffers[imageIndex],
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &*renderFinished,
+    };
+
+    queue.submit(submitInfo, nullptr);
+
+    vk::PresentInfoKHR presentInfo{
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &*renderFinished,
+        .swapchainCount = 1,
+        .pSwapchains = &*swapchain,
+        .pImageIndices = &imageIndex,
+        //.pResults = nullptr,
+    };
+
+    queue.presentKHR(presentInfo);
+
+    queue.waitIdle();
+}
+
 void run()
 {
     createWindow(APP_NAME, WIDTH, HEIGHT);
@@ -545,107 +670,23 @@ void run()
     chooseQueueFamily();
     createDevice(deviceExtensions);
     createSwapchain();
+    createImageViews();
     createRenderPass();
     createGraphicsPipeline();
+    createFramebuffers();
+    createCommandPool();
+    createCommandBuffers();
+    createSemaphores();
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
+        drawFrame();
     }
+
+    device->waitIdle();
 
     destroyWindow();
 }
-
-/*
-auto vertexShaderBuffer = readBinaryFile("../resources/shader.vert.spv");
-vk::ShaderModuleCreateInfo vertexShaderCreateInfo(
-    vk::ShaderModuleCreateFlags(),
-    vertexShaderBuffer.size(),
-    reinterpret_cast<uint32_t *>(vertexShaderBuffer.data()));
-vk::UniqueShaderModule vertexShader = device->createShaderModuleUnique(vertexShaderCreateInfo);
-
-auto fragmentShaderBuffer = readBinaryFile("../resources/shader.frag.spv");
-vk::ShaderModuleCreateInfo fragmentShaderCreateInfo(
-    vk::ShaderModuleCreateFlags(),
-    fragmentShaderBuffer.size(),
-    reinterpret_cast<uint32_t *>(fragmentShaderBuffer.data()));
-vk::UniqueShaderModule fragmentShader =
-    device->createShaderModuleUnique(fragmentShaderCreateInfo);
-
-std::vector<vk::PipelineShaderStageCreateInfo> shaderStages;
-shaderStages.push_back(vk::PipelineShaderStageCreateInfo(
-    vk::PipelineShaderStageCreateFlags(),
-    vk::ShaderStageFlagBits::eVertex,
-    *vertexShader,
-    "main"));
-shaderStages.push_back(vk::PipelineShaderStageCreateInfo(
-    vk::PipelineShaderStageCreateFlags(),
-    vk::ShaderStageFlagBits::eFragment,
-    *fragmentShader,
-    "main"));
-
-// NOTE: Decided to use the setter functions to see if it improves
-// readability.
-
-auto vertexInputCreateInfo = vk::PipelineVertexInputStateCreateInfo();
-
-auto inputAssemblyCreateInfo = vk::PipelineInputAssemblyStateCreateInfo()
-                                   .setTopology(vk::PrimitiveTopology::eTriangleList)
-                                   .setPrimitiveRestartEnable(false);
-
-auto viewport = vk::Viewport()
-                    .setX(0.0)
-                    .setY(0.0)
-                    .setWidth(swapchainExtent.width)
-                    .setHeight(swapchainExtent.height)
-                    .setMinDepth(0.0)
-                    .setMaxDepth(1.0);
-
-auto scissor = vk::Rect2D().setOffset({0, 0}).setExtent(swapchainExtent);
-
-auto viewportStageCreateInfo =
-    vk::PipelineViewportStateCreateInfo().setViewports(viewport).setScissors(scissor);
-
-auto rasterizerCreateInfo = vk::PipelineRasterizationStateCreateInfo()
-                                .setDepthClampEnable(false)
-                                .setPolygonMode(vk::PolygonMode::eFill)
-                                .setLineWidth(1.0)
-                                .setCullMode(vk::CullModeFlagBits::eBack)
-                                .setFrontFace(vk::FrontFace::eClockwise)
-                                .setDepthBiasClamp(false);
-
-auto multisampleCreateInfo = vk::PipelineMultisampleStateCreateInfo()
-                                 .setSampleShadingEnable(false)
-                                 .setRasterizationSamples(vk::SampleCountFlagBits::e1)
-                                 .setMinSampleShading(1.0);
-
-auto colorBlendAttachment =
-    vk::PipelineColorBlendAttachmentState()
-        .setColorWriteMask(
-            vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG
-            | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA)
-        .setBlendEnable(false)
-        .setSrcColorBlendFactor(vk::BlendFactor::eOne)
-        .setDstColorBlendFactor(vk::BlendFactor::eZero)
-        .setColorBlendOp(vk::BlendOp::eAdd)
-        .setSrcAlphaBlendFactor(vk::BlendFactor::eOne)
-        .setDstAlphaBlendFactor(vk::BlendFactor::eZero)
-        .setAlphaBlendOp(vk::BlendOp::eAdd);
-
-auto colorBlendCreateInfo = vk::PipelineColorBlendStateCreateInfo()
-                                .setLogicOpEnable(false)
-                                .setLogicOp(vk::LogicOp::eCopy)
-                                .setAttachments(colorBlendAttachment)
-                                .setBlendConstants({0.0, 0.0, 0.0, 0.0});
-
-std::array<vk::DynamicState, 2> dynamicStates = {
-    vk::DynamicState::eViewport,
-    vk::DynamicState::eLineWidth};
-auto dynamicStateCreateInfo =
-    vk::PipelineDynamicStateCreateInfo().setDynamicStates(dynamicStates);
-
-auto pipelineLayoutCreateInfo = vk::PipelineLayoutCreateInfo();
-auto pipelinelayout = device->createPipelineLayoutUnique(pipelineLayoutCreateInfo);
-*/
 
 int main()
 {
